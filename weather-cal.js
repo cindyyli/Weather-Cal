@@ -43,7 +43,7 @@ const layout = `
 
 // Names of Weather Cal elements.
 const codeFilename = "Weather Cal code"
-const gitHubUrl = "https://raw.githubusercontent.com/mzeryck/Weather-Cal/main/weather-cal-code.js"
+const gitHubUrl = "https://raw.githubusercontent.com/jmew/Weather-Cal/main/weather-cal-code.js"
 
 // Determine if the user is using iCloud.
 let files = FileManager.local()
