@@ -26,7 +26,7 @@ const weatherCal = {
     this.iCloudInUse = iCloudInUse
     this.fm = iCloudInUse ? FileManager.iCloud() : FileManager.local()
     this.prefPath = this.fm.joinPath(this.fm.libraryDirectory(), this.prefName)
-    this.widgetUrl = "https://raw.githubusercontent.com/mzeryck/Weather-Cal/main/weather-cal.js"
+    this.widgetUrl = "https://raw.githubusercontent.com/jmew/Weather-Cal/refs/heads/nosunrise/weather-cal.js"
     this.initialized = true
   },
 
@@ -158,7 +158,7 @@ const weatherCal = {
 
     // Prompt the user for updates.
     if (response == menu.update) {
-      message = "Would you like to update the Weather Cal code? Your widgets will not be affected."
+      message = "Update the shared Weather Cal code? This changes the code used by all your Weather Cal widgets."
       options = ["Update", "Exit"]
       const updateResponse = await this.generateAlert(message,options)
 
@@ -281,7 +281,7 @@ const weatherCal = {
     this.writePreference("weather-cal-api-key", apiKey)
 
     // Test to see if the key works.
-    const req = new Request("https://api.openweathermap.org/data/2.5/onecall?lat=37.332280&lon=-122.010980&appid=" + apiKey)
+    const req = new Request("https://api.openweathermap.org/data/3.0/onecall?lat=37.332280&lon=-122.010980&appid=" + apiKey)
 
     let val = {}
     try { val = await req.loadJSON() } catch { val.current = false }
@@ -531,7 +531,10 @@ const weatherCal = {
 
     try {
       const codeString = await req.loadString()
-      if (codeString.indexOf("// Variables used by Scriptable.") < 0) {
+      if (!codeString.startsWith("// Variables used by Scriptable.") ||
+          !codeString.includes("async createWidget(") ||
+          !codeString.includes("async runSetup(") ||
+          !codeString.includes("module.exports")) {
         return false
       } else {
         this.fm.writeString(pathToCode, codeString)
@@ -1097,13 +1100,13 @@ const weatherCal = {
     const locationExists = this.fm.fileExists(locationPath)
     let cachedLocation
     if (locationExists) {
-      cachedLocation = JSON.parse(this.fm.readString(locationPath))
+      try { cachedLocation = JSON.parse(this.fm.readString(locationPath)) } catch {}
     }
 
     // If it's been more than an hour, ask iOS for location.
     let location, geocode
     const timeToCache = 60 * 60 * 1000
-    const locationDate = locationExists ? this.fm.modificationDate(locationPath).getTime() : -(timeToCache+1)
+    const locationDate = cachedLocation ? this.fm.modificationDate(locationPath).getTime() : -(timeToCache+1)
     const locationDataOld = (this.now.getTime() - locationDate) > timeToCache
     if (locationDataOld) {
       try {
@@ -1119,18 +1122,18 @@ const weatherCal = {
       this.data.location.latitude = location.latitude
       this.data.location.longitude = location.longitude
     } else {
-      this.data.location.latitude = cachedLocation.latitude
-      this.data.location.longitude = cachedLocation.longitude
+      this.data.location.latitude = cachedLocation ? cachedLocation.latitude : null
+      this.data.location.longitude = cachedLocation ? cachedLocation.longitude : null
     }
 
-    if (geocode) {
-      this.data.location.locality = (geocode[0].locality || geocode[0].postalAddress.city) || geocode[0].administrativeArea
+    if (geocode && geocode[0]) {
+      this.data.location.locality = (geocode[0].locality || (geocode[0].postalAddress && geocode[0].postalAddress.city)) || geocode[0].administrativeArea
     } else {
-      this.data.location.locality = cachedLocation.locality
+      this.data.location.locality = cachedLocation ? cachedLocation.locality : ""
     }
 
     // If we have old location data, save it to disk.
-    if (locationDataOld) {
+    if (locationDataOld && this.data.location.latitude != null && this.data.location.longitude != null) {
       this.fm.writeString(locationPath, JSON.stringify(this.data.location))
     }
   },
@@ -1147,20 +1150,22 @@ const weatherCal = {
     // Set up the cache.
     const cachePath = this.fm.joinPath(this.fm.libraryDirectory(), "weather-cal-cache")
     const cacheExists = this.fm.fileExists(cachePath)
-    const cacheDate = cacheExists ? this.fm.modificationDate(cachePath) : 0
-    let weatherDataRaw
+    const cacheDate = cacheExists ? this.fm.modificationDate(cachePath) : null
+    let cachedWeather
+    if (cacheExists) {
+      try {
+        const parsed = JSON.parse(this.fm.readString(cachePath))
+        if (this.validWeatherData(parsed)) cachedWeather = parsed
+      } catch {}
+    }
+    let weatherDataRaw = cachedWeather
 
     // If cache exists and it's been less than 60 seconds since last request, use cached data.
-    if (cacheExists && (this.now.getTime() - cacheDate.getTime()) < 60000) {
-      const cache = this.fm.readString(cachePath)
-      weatherDataRaw = JSON.parse(cache)
-
-    // Otherwise, use the API to get new weather data.
-    } else {
+    if (!cachedWeather || !cacheDate || (this.now.getTime() - cacheDate.getTime()) >= 60000) {
 
       // OpenWeather only supports a subset of language codes.
       const openWeatherLang = ["af","al","ar","az","bg","ca","cz","da","de","el","en","eu","fa","fi","fr","gl","he","hi","hr","hu","id","it","ja","kr","la","lt","mk","no","nl","pl","pt","pt_br","ro","ru","sv","se","sk","sl","sp","es","sr","th","tr","ua","uk","vi","zh_cn","zh_tw","zu"]
-      var lang
+      let lang = ""
 
       // Find all possible language matches.
       const languages = [this.locale, this.locale.split("_")[0], Device.locale(), Device.locale().split("_")[0]]
@@ -1174,13 +1179,18 @@ const weatherCal = {
       }
 
       const apiKeyPath = this.fm.joinPath(this.fm.libraryDirectory(), "weather-cal-api-key")
-      const apiKey = this.fm.readString(apiKeyPath)
+      const apiKey = this.fm.fileExists(apiKeyPath) ? this.fm.readString(apiKeyPath) : null
 
-      try {
-        const weatherReq = "https://api.openweathermap.org/data/3.0/onecall?lat=" + this.data.location.latitude + "&lon=" + this.data.location.longitude + "&exclude=minutely,alerts&units=" + this.settings.widget.units + lang + "&appid=" + apiKey
-        weatherDataRaw = await new Request(weatherReq).loadJSON()
-        this.fm.writeString(cachePath, JSON.stringify(weatherDataRaw))
-      } catch {}
+      if (apiKey && this.data.location.latitude != null && this.data.location.longitude != null) {
+        try {
+          const weatherReq = "https://api.openweathermap.org/data/3.0/onecall?lat=" + this.data.location.latitude + "&lon=" + this.data.location.longitude + "&exclude=minutely,alerts&units=" + this.settings.widget.units + lang + "&appid=" + apiKey
+          const freshWeather = await new Request(weatherReq).loadJSON()
+          if (this.validWeatherData(freshWeather)) {
+            weatherDataRaw = freshWeather
+            this.fm.writeString(cachePath, JSON.stringify(freshWeather))
+          }
+        } catch {}
+      }
     }
 
     // If it's an error, treat it as a null value.
@@ -1206,6 +1216,15 @@ const weatherCal = {
     }
     this.data.weather.tomorrowRain = weatherDataRaw ? weatherDataRaw.daily[1].pop : null
     this.data.weather.nextHourRain = weatherDataRaw ? weatherDataRaw.hourly[1].pop : null
+    this.data.weather.sunTimes = weatherDataRaw ? weatherDataRaw.daily.map(day => ({ sunrise: day.sunrise, sunset: day.sunset })) : []
+  },
+
+  // Only cache responses with the fields used by every weather item.
+  validWeatherData(data) {
+    return !!(data && data.current && data.current.weather && data.current.weather[0] &&
+      data.daily && data.daily.length >= 8 && data.hourly && data.hourly.length >= 8 &&
+      data.daily.slice(0, 8).every(day => day && day.temp && day.weather && day.weather[0]) &&
+      data.hourly.slice(0, 8).every(hour => hour && hour.weather && hour.weather[0]))
   },
   /*
    * WIDGET ITEMS
@@ -1949,17 +1968,13 @@ const weatherCal = {
 
   // Determines if the provided date is at night.
   async isNight(dateInput) {
-    if (!this.data.location) { await this.setupLocation() }
-    const location = this.data.location
-
-    const sunData = await new Request(`https://api.sunrise-sunset.org/json?lat=${location.latitude}&lng=${location.longitude}&formatted=0`).loadJSON()
-    const sunrise = new Date(sunData.results.sunrise)
-    const sunset = new Date(sunData.results.sunset)
-
-    // Convert dateInput to a Date in case it's a timestamp.
-    const dateToCheck = (typeof dateInput === "number" || typeof dateInput === "string") ? new Date(dateInput * 1000) : dateInput
-
-    return dateToCheck < sunrise || dateToCheck > sunset
+    const dateToCheck = dateInput instanceof Date ? dateInput : dateInput ? new Date(dateInput * 1000) : this.now
+    const timestamp = dateToCheck.getTime() / 1000
+    const sunTimes = this.data.weather && this.data.weather.sunTimes
+    const day = sunTimes && sunTimes.find(item => item.sunrise && item.sunset && timestamp >= item.sunrise - 43200 && timestamp < item.sunrise + 43200)
+    if (day) return timestamp < day.sunrise || timestamp > day.sunset
+    // With no forecast available, keep the icon visible using a local-time estimate.
+    return dateToCheck.getHours() < 6 || dateToCheck.getHours() >= 18
   },
 
   // Determines if two dates occur on the same day.
@@ -2097,7 +2112,7 @@ const weatherCal = {
     let conditionDigit = Math.floor(cond / 100)
 
     // Get the symbol.
-    return SFSymbol.named(symbols[conditionDigit]()).image
+    return SFSymbol.named(symbols[conditionDigit] ? symbols[conditionDigit]() : "questionmark.circle").image
   },
 
   // Provide a font based on the input.
@@ -2170,6 +2185,7 @@ const weatherCal = {
 
     // Calculate the current percentage of the high-low range.
     let percent = (weatherData.currentTemp - weatherData.todayLow) / (weatherData.todayHigh - weatherData.todayLow)
+    if (!Number.isFinite(percent)) percent = 0.5
 
     // If we're out of bounds, clip it.
     if (percent < 0) {

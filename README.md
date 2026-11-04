@@ -65,12 +65,10 @@ The layout is just a list of [widget items](#widget-items) and [layout items](#s
 You can add the following items to your widget:
  
 - `battery`
-- `covid`
 - `date` 
 - `events` 
 - `greeting`
 - `reminders`
-- `sunrise`, which shows the sunrise or sunset time automatically
 - custom `text`, by writing `text(Your text here)`
 - Weather items
 	- `current` conditions
