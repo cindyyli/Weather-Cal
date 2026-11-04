@@ -417,7 +417,9 @@ const weatherCal = {
   // Get the current settings for the widget or for editing.
   async getSettings(forEditing = false) {
     let settingsFromFile
-    if (this.fm.fileExists(this.prefPath)) { settingsFromFile = JSON.parse(this.fm.readString(this.prefPath)) }
+    if (this.fm.fileExists(this.prefPath)) {
+      try { settingsFromFile = JSON.parse(this.fm.readString(this.prefPath)) } catch {}
+    }
 
     const settingsObject = await this.defaultSettings()
     for (category in settingsObject) {
@@ -476,15 +478,22 @@ const weatherCal = {
 
   // Download a Scriptable script.
   async downloadCode(filename, url) {
+    const path = this.fm.joinPath(this.fm.documentsDirectory(), filename + ".js")
+    const temporaryPath = path + ".download"
     try {
       const codeString = await new Request(url).loadString()
-      if (codeString.indexOf("// Variables used by Scriptable.") < 0) {
-        return false
-      } else {
-        this.fm.writeString(this.fm.joinPath(this.fm.documentsDirectory(), filename + ".js"), codeString)
-        return true
-      }
+      const isBackend = filename == "Weather Cal code"
+      const complete = isBackend ?
+        codeString.includes("module.exports = weatherCal") && /\/\/\d+$/.test(codeString.trim()) :
+        codeString.includes("Script.setWidget(widget)") && codeString.includes("importModule(codeFilename)")
+      if (!codeString.startsWith("// Variables used by Scriptable.") || !complete) return false
+
+      // Keep the installed script until the full download has been validated.
+      this.fm.writeString(temporaryPath, codeString)
+      this.fm.move(temporaryPath, path)
+      return true
     } catch {
+      if (this.fm.fileExists(temporaryPath)) this.fm.remove(temporaryPath)
       return false
     }
   },
@@ -567,7 +576,9 @@ const weatherCal = {
     this.widget.setPadding(topPad, leftPad, bottomPad, rightPad)
 
     // Background setup.
-    const background = JSON.parse(this.fm.readString(this.bgPath))
+    let background
+    try { background = JSON.parse(this.fm.readString(this.bgPath)) } catch {}
+    if (!background || !background.type) background = { type: "color", color: "000000" }
 
     if (custom && custom.background) {
       await custom.background(this.widget)
@@ -597,8 +608,12 @@ const weatherCal = {
       const imagePath = this.fm.joinPath(this.fm.joinPath(this.fm.documentsDirectory(), "Weather Cal"), name + extension)
 
       if (this.fm.fileExists(imagePath)) {
-        if (this.fm.isFileStoredIniCloud(imagePath)) { await this.fm.downloadFileFromiCloud(imagePath) }
-        this.widget.backgroundImage = this.fm.readImage(imagePath)
+        try {
+          if (this.fm.isFileStoredIniCloud(imagePath)) { await this.fm.downloadFileFromiCloud(imagePath) }
+          this.widget.backgroundImage = this.fm.readImage(imagePath)
+        } catch {
+          this.widget.backgroundColor = Color.gray()
+        }
 
       } else if (config.runsInWidget) {
         this.widget.backgroundColor = Color.gray()

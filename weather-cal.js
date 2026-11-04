@@ -61,7 +61,10 @@ if (!files.fileExists(pathToCode)) {
 }
 
 // Import the code.
-if (iCloudInUse) { await files.downloadFileFromiCloud(pathToCode) }
+if (iCloudInUse) {
+  // A previously downloaded module can still be used when iCloud is offline.
+  try { await files.downloadFileFromiCloud(pathToCode) } catch {}
+}
 const code = importModule(codeFilename)
 
 const custom = {

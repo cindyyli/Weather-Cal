@@ -32,6 +32,8 @@ If you already installed Weather Cal, replace the GitHub URL in your widget scri
 
 When a widget refresh happens without internet, it uses a valid cached forecast for up to six hours. After that, weather values show placeholders until the next successful refresh. The rest of the widget can still render without a cached location or forecast.
 
+Updating the backend requires internet. If the download fails or is incomplete, Weather Cal keeps the installed backend script. A first-time installation still needs a connection to download that script.
+
 ![Screenshots showing how to set up Weather Cal](https://github.com/mzeryck/Weather-Cal/blob/main/images/setup.jpg)
 
 Once Weather Cal is set up, you can make multiple widgets by duplicating the widget script. You only need one copy of the Weather Cal code script.

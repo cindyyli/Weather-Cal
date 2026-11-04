@@ -1,4 +1,6 @@
 const assert = require("node:assert/strict")
+const fs = require("node:fs")
+const path = require("node:path")
 const test = require("node:test")
 const weatherCal = require("../weather-cal-code.js")
 
@@ -6,10 +8,13 @@ function makeWidget(files = {}) {
   const dates = Object.fromEntries(Object.keys(files).map(path => [path, new Date()]))
   const fm = {
     libraryDirectory: () => "/library",
+    documentsDirectory: () => "/docs",
     joinPath: (dir, name) => dir + "/" + name,
     fileExists: path => Object.hasOwn(files, path),
     readString: path => files[path],
     writeString: (path, value) => { files[path] = value; dates[path] = new Date() },
+    move: (source, destination) => { files[destination] = files[source]; delete files[source] },
+    remove: path => { delete files[path] },
     modificationDate: path => dates[path] || new Date(0),
   }
   const widget = Object.create(weatherCal)
@@ -131,4 +136,70 @@ test("malformed weather response without cache uses placeholders", async () => {
   await widget.setupWeather()
   assert.equal(widget.data.weather.currentTemp, null)
   assert.equal(widget.data.weather.forecast[1].Condition, 100)
+})
+
+test("damaged preferences fall back to defaults without overwriting the file", async () => {
+  const { widget, files } = makeWidget({ "/library/preferences": "invalid json" })
+  widget.prefPath = "/library/preferences"
+  const settings = await widget.getSettings()
+  assert.equal(settings.widget.units, "imperial")
+  assert.equal(files["/library/preferences"], "invalid json")
+})
+
+test("the widget script imports a previously installed backend while offline", async () => {
+  const source = fs.readFileSync(path.join(__dirname, "../weather-cal.js"), "utf8")
+  const AsyncFunction = Object.getPrototypeOf(async function() {}).constructor
+  let importedName, renderedWidget
+  const fm = {
+    isFileStoredIniCloud: () => true,
+    documentsDirectory: () => "/docs",
+    joinPath: (dir, name) => dir + "/" + name,
+    fileExists: file => file == "/docs/Weather Cal code.js",
+    downloadFileFromiCloud: async () => { throw new Error("offline") },
+  }
+  const FileManager = { local: () => fm, iCloud: () => fm }
+  const Script = {
+    name: () => "My Weather Cal",
+    setWidget: widget => { renderedWidget = widget },
+    complete: () => {},
+  }
+  const importModule = name => {
+    importedName = name
+    return { createWidget: async () => ({ id: "rendered" }) }
+  }
+  const Request = class { constructor() { throw new Error("unexpected network request") } }
+  const run = new AsyncFunction("FileManager", "module", "Request", "importModule", "config", "Script", source)
+  await run(FileManager, { filename: "/docs/My Weather Cal.js" }, Request, importModule, { runsInApp: false }, Script)
+  assert.equal(importedName, "Weather Cal code")
+  assert.deepEqual(renderedWidget, { id: "rendered" })
+})
+
+test("failed or partial backend updates preserve the installed script", async () => {
+  const oldCode = "working installed backend"
+  const { widget, files } = makeWidget({ "/docs/Weather Cal code.js": oldCode })
+  global.Request = class { async loadString() { throw new Error("offline") } }
+  assert.equal(await widget.downloadCode("Weather Cal code", "https://example.test/backend.js"), false)
+  assert.equal(files["/docs/Weather Cal code.js"], oldCode)
+
+  global.Request = class { async loadString() { return "// Variables used by Scriptable.\npartial" } }
+  assert.equal(await widget.downloadCode("Weather Cal code", "https://example.test/backend.js"), false)
+  assert.equal(files["/docs/Weather Cal code.js"], oldCode)
+  assert.equal(files["/docs/Weather Cal code.js.download"], undefined)
+})
+
+test("complete backend update replaces the script after validation", async () => {
+  const { widget, files } = makeWidget({ "/docs/Weather Cal code.js": "old code" })
+  const newCode = fs.readFileSync(path.join(__dirname, "../weather-cal-code.js"), "utf8")
+  global.Request = class { async loadString() { return newCode } }
+  assert.equal(await widget.downloadCode("Weather Cal code", "https://example.test/backend.js"), true)
+  assert.equal(files["/docs/Weather Cal code.js"], newCode)
+  assert.equal(files["/docs/Weather Cal code.js.download"], undefined)
+})
+
+test("widget reset still accepts the complete launcher script", async () => {
+  const { widget, files } = makeWidget({ "/docs/My Weather Cal.js": "old code" })
+  const newCode = fs.readFileSync(path.join(__dirname, "../weather-cal.js"), "utf8")
+  global.Request = class { async loadString() { return newCode } }
+  assert.equal(await widget.downloadCode("My Weather Cal", "https://example.test/widget.js"), true)
+  assert.equal(files["/docs/My Weather Cal.js"], newCode)
 })
