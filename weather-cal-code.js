@@ -527,20 +527,22 @@ const weatherCal = {
   // Download a Scriptable script.
   async downloadCode(filename, url) {
     const pathToCode = this.fm.joinPath(this.fm.documentsDirectory(), filename + ".js")
-    const req = new Request(url)
+    const temporaryPath = pathToCode + ".download"
 
     try {
-      const codeString = await req.loadString()
-      if (!codeString.startsWith("// Variables used by Scriptable.") ||
-          !codeString.includes("async createWidget(") ||
-          !codeString.includes("async runSetup(") ||
-          !codeString.includes("module.exports")) {
-        return false
-      } else {
-        this.fm.writeString(pathToCode, codeString)
-        return true
-      }
+      const codeString = await new Request(url).loadString()
+      const isBackend = filename == "Weather Cal code"
+      const complete = isBackend ?
+        codeString.includes("async createWidget(") && codeString.includes("async runSetup(") && codeString.includes("module.exports = weatherCal") :
+        codeString.includes("Script.setWidget(widget)") && codeString.includes("importModule(codeFilename)")
+      if (!codeString.startsWith("// Variables used by Scriptable.") || !complete) return false
+
+      // Keep the installed script until the complete download has been written.
+      this.fm.writeString(temporaryPath, codeString)
+      this.fm.move(temporaryPath, pathToCode)
+      return true
     } catch {
+      if (this.fm.fileExists(temporaryPath)) this.fm.remove(temporaryPath)
       return false
     }
   },
@@ -1152,7 +1154,7 @@ const weatherCal = {
     const cacheExists = this.fm.fileExists(cachePath)
     const cacheDate = cacheExists ? this.fm.modificationDate(cachePath) : null
     let cachedWeather
-    if (cacheExists) {
+    if (cacheExists && cacheDate && (this.now.getTime() - cacheDate.getTime()) <= 6 * 60 * 60 * 1000) {
       try {
         const parsed = JSON.parse(this.fm.readString(cachePath))
         if (this.validWeatherData(parsed)) cachedWeather = parsed

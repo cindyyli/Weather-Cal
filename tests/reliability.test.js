@@ -1,16 +1,23 @@
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
 const code = require('../weather-cal-code.js')
 
 function makeFileManager(files = {}) {
   const dates = {}
+  for (const path of Object.keys(files)) dates[path] = new Date('2026-11-03T14:00:00Z')
   return {
     files,
+    dates,
+    documentsDirectory: () => '/documents',
     libraryDirectory: () => '/library',
     joinPath: (a, b) => `${a}/${b}`,
     fileExists: path => Object.hasOwn(files, path),
     readString: path => files[path],
     writeString(path, value) { files[path] = value; dates[path] = new Date() },
+    move(source, destination) { files[destination] = files[source]; delete files[source]; dates[destination] = dates[source]; delete dates[source] },
+    remove(path) { delete files[path]; delete dates[path] },
     modificationDate: path => dates[path] || new Date(0),
   }
 }
@@ -77,8 +84,60 @@ test('bad cache and API error never replace usable data', async () => {
   assert.equal(instance.fm.files['/library/weather-cal-cache'], '{bad')
 })
 
+test('weather older than six hours is not displayed as current', async () => {
+  const instance = makeCode({
+    '/library/weather-cal-location': JSON.stringify({ latitude: 37, longitude: -122 }),
+    '/library/weather-cal-cache': JSON.stringify(weather()),
+    '/library/weather-cal-api-key': 'existing-key',
+  })
+  instance.fm.dates['/library/weather-cal-cache'] = new Date('2026-11-02T14:00:00Z')
+  global.Device = { locale: () => 'en_US' }
+  global.Request = class { async loadJSON() { throw Error('offline') } }
+  await instance.setupWeather()
+  assert.equal(instance.data.weather.currentTemp, null)
+  assert.equal(instance.fm.files['/library/weather-cal-cache'], JSON.stringify(weather()))
+})
+
+test('incomplete backend update keeps the installed script', async () => {
+  const instance = makeCode({ '/documents/Weather Cal code.js': 'working backend' })
+  global.Request = class { async loadString() { return '<html>Server error</html>' } }
+  assert.equal(await instance.downloadCode('Weather Cal code', 'https://example.test'), false)
+  assert.equal(instance.fm.files['/documents/Weather Cal code.js'], 'working backend')
+})
+
+test('validated backend update replaces the installed script', async () => {
+  const instance = makeCode({ '/documents/Weather Cal code.js': 'old backend' })
+  const newBackend = '// Variables used by Scriptable.\nasync createWidget(\nasync runSetup(\nmodule.exports = weatherCal'
+  global.Request = class { async loadString() { return newBackend } }
+  assert.equal(await instance.downloadCode('Weather Cal code', 'https://example.test'), true)
+  assert.equal(instance.fm.files['/documents/Weather Cal code.js'], newBackend)
+  assert.equal(instance.fm.fileExists('/documents/Weather Cal code.js.download'), false)
+})
+
 test('real layout tokens still resolve to widget items', () => {
   for (const item of ['date', 'events', 'reminders', 'greeting', 'current']) {
     assert.equal(typeof code[item], 'function')
   }
+})
+
+test('legacy widget preferences remain readable', () => {
+  const instance = makeCode({
+    '/library/weather-cal-preferences-My Widget': JSON.stringify({
+      widget: { units: 'metric', padding: '4', tintIcons: false },
+      events: { selectCalendars: 'Work,Home,Jemew/Cli,Calendar,jemew@google.com' },
+      reminders: { numberOfReminders: '4' },
+      weather: { urlCurrent: 'weather://' },
+    }),
+  })
+  instance.prefPath = '/library/weather-cal-preferences-My Widget'
+  const settings = instance.getSettings()
+  assert.equal(settings.widget.units, 'metric')
+  assert.equal(settings.events.selectCalendars, 'Work,Home,Jemew/Cli,Calendar,jemew@google.com')
+  assert.equal(settings.reminders.numberOfReminders, '4')
+  assert.equal(settings.weather.urlCurrent, 'weather://')
+})
+
+test('starter widget fetches the same nosunrise branch', () => {
+  const starter = fs.readFileSync(path.join(__dirname, '..', 'weather-cal.js'), 'utf8')
+  assert.match(starter, /jmew\/Weather-Cal\/refs\/heads\/nosunrise\/weather-cal-code\.js/)
 })

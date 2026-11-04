@@ -20,11 +20,13 @@ This is a Scriptable widget that lets you display, position, and format multiple
 ## Setup
 Setting up Weather Cal is easy:
 
-1. Copy the code in [weather-cal.js](https://raw.githubusercontent.com/mzeryck/Weather-Cal/main/weather-cal.js). (You don't need to do anything with weather-cal-code.js.)
+1. Copy the code in [weather-cal.js](https://raw.githubusercontent.com/jmew/Weather-Cal/refs/heads/nosunrise/weather-cal.js). (You don't need to do anything with weather-cal-code.js.)
 
 2. Paste the code into a new Scriptable script. This is the widget script.
 
 3. Run the script. It will download the code script in the background and walk you through each step of the setup process.
+
+Existing widgets whose code URL points to `nosunrise` can use **Update code** after changes are merged into that branch. This updates the shared code script; it does not replace each widget's layout or saved OpenWeather key. When offline, Weather Cal uses a valid cached forecast for up to six hours, then shows weather placeholders until a refresh succeeds.
 
 ![Screenshots showing how to set up Weather Cal](https://github.com/mzeryck/Weather-Cal/blob/main/images/setup.jpg)
 
