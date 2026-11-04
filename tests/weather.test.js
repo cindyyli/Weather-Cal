@@ -203,3 +203,49 @@ test("widget reset still accepts the complete launcher script", async () => {
   assert.equal(await widget.downloadCode("My Weather Cal", "https://example.test/widget.js"), true)
   assert.equal(files["/docs/My Weather Cal.js"], newCode)
 })
+
+test("existing ASCII layout items remain recognized", async () => {
+  const { widget } = makeWidget()
+  const layout = `
+-------------------
+|date             |
+-------------------
+|events |reminders|
+-------------------
+|space            |
+-------------------
+|         greeting|
+-------------------
+|          current|
+-------------------
+`
+  widget.currentColumns = []
+  widget.rowNeedsSetup = false
+  widget.currentColumn = {}
+  const found = []
+  widget.row = () => {}
+  widget.column = () => {}
+  widget.executeItem = async item => { found.push(item) }
+  for (const line of layout.split("\n").map(line => line.trim()).filter(Boolean)) {
+    await widget.processASCIILine(line)
+  }
+  for (const item of ["date", "events", "reminders", "space", "greeting", "current"]) {
+    assert.ok(found.includes(item), `${item} is parsed from the existing layout`)
+  }
+})
+
+test("older saved preference values remain usable", async () => {
+  const oldSettings = {
+    widget: { units: "metric", padding: "4", tintIcons: false },
+    events: { selectCalendars: "Work,Home", numberOfDays: "2" },
+    reminders: { selectLists: "", numberOfReminders: "4" },
+    weather: { horizontalCondition: true, showRain: true, urlCurrent: "weather://" },
+  }
+  const { widget } = makeWidget({ "/library/preferences": JSON.stringify(oldSettings) })
+  widget.prefPath = "/library/preferences"
+  const settings = await widget.getSettings()
+  assert.equal(settings.widget.units, "metric")
+  assert.equal(settings.events.selectCalendars, "Work,Home")
+  assert.equal(settings.reminders.numberOfReminders, "4")
+  assert.equal(settings.weather.urlCurrent, "weather://")
+})
