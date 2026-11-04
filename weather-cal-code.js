@@ -857,18 +857,21 @@ const weatherCal = {
       try { location = await Location.current() }
       catch { location = locationCache || { cacheExpired: true } }
 
-      try {
-        const geocode = await Location.reverseGeocode(location.latitude, location.longitude, this.locale)
-        location.locality = (geocode[0].locality || geocode[0].postalAddress.city) || geocode[0].administrativeArea
-      } catch {
-        location.locality = locationCache ? locationCache.locality : null
+      if (location.latitude != null && location.longitude != null) {
+        try {
+          const geocode = await Location.reverseGeocode(location.latitude, location.longitude, this.locale)
+          location.locality = geocode[0].locality || (geocode[0].postalAddress && geocode[0].postalAddress.city) || geocode[0].administrativeArea
+        } catch {
+          location.locality = locationCache ? locationCache.locality : null
+        }
       }
 
       // If (and only if) we have new data, write it to disk.
-      if (!location.cacheExpired) this.fm.writeString(locationPath, JSON.stringify(location))
+      if (!location.cacheExpired && location.latitude != null && location.longitude != null) this.fm.writeString(locationPath, JSON.stringify(location))
     }
-    this.data.location = location || locationCache
-    if (!this.data.location.latitude) return false
+    this.data.location = location || locationCache || {}
+    this.data.location.locality = this.data.location.locality || "--"
+    if (this.data.location.latitude == null || this.data.location.longitude == null) return false
     return true
   },
 
@@ -878,6 +881,7 @@ const weatherCal = {
 
 	const sunPath = this.fm.joinPath(this.fm.libraryDirectory(), "weather-cal-cache")
 	let sunData = this.getCache(sunPath, 60, 1440)
+	if (!this.hasSunData(sunData)) sunData = null
 
 	const forcedLocale = this.settings.weather.locale || ""
 	let locale = forcedLocale.length ? forcedLocale : this.locale
@@ -893,13 +897,15 @@ const weatherCal = {
 		}
 	}
 
-	if (!sunData || sunData.cacheExpired) {
+	if ((!sunData || sunData.cacheExpired) && this.data.location.latitude != null && this.data.location.longitude != null) {
 		try {
 			const apiPath = await this.getWeatherApiPath()
 			const sunReq = apiPath + "&lat=" + this.data.location.latitude + "&lon=" + this.data.location.longitude + "&exclude=minutely,alerts&units=" + this.settings.widget.units + "&lang=" + locale
-			sunData = await new Request(sunReq).loadJSON()
-			if (sunData.cod) { sunData = null }
-			if (sunData) { this.fm.writeString(sunPath, JSON.stringify(sunData)) }
+			const response = await new Request(sunReq).loadJSON()
+			if (this.hasSunData(response)) {
+				sunData = response
+				this.fm.writeString(sunPath, JSON.stringify(response))
+			}
 		} catch {}
 	}
 
@@ -914,7 +920,8 @@ const weatherCal = {
     if (!this.data.location) { await this.setupLocation() }
 
     const weatherPath = this.fm.joinPath(this.fm.libraryDirectory(), "weather-cal-cache")
-    let weatherData = this.getCache(weatherPath, 1, 60)
+    let weatherData = this.getCache(weatherPath, 1, 360)
+    if (!this.hasWeatherData(weatherData)) weatherData = null
 
     const forcedLocale = this.settings.weather.locale || ""
     let locale = forcedLocale.length ? forcedLocale : this.locale
@@ -930,13 +937,15 @@ const weatherCal = {
       }
     }
 
-    if (!weatherData || weatherData.cacheExpired) {
+    if ((!weatherData || weatherData.cacheExpired) && this.data.location.latitude != null && this.data.location.longitude != null) {
       try {
         const apiPath = await this.getWeatherApiPath()
         const weatherReq = apiPath + "&lat=" + this.data.location.latitude + "&lon=" + this.data.location.longitude + "&exclude=minutely,alerts&units=" + this.settings.widget.units + "&lang=" + locale
-        weatherData = await new Request(weatherReq).loadJSON()
-        if (weatherData.cod) { weatherData = null }
-        if (weatherData) { this.fm.writeString(weatherPath, JSON.stringify(weatherData)) }
+        const response = await new Request(weatherReq).loadJSON()
+        if (this.hasWeatherData(response)) {
+          weatherData = response
+          this.fm.writeString(weatherPath, JSON.stringify(response))
+        }
       } catch {}
     }
 
@@ -953,8 +962,10 @@ const weatherCal = {
     this.data.weather.forecast = []
     this.data.weather.hourly = []
     for (let i=0; i <= 7; i++) {
-      this.data.weather.forecast[i] = weatherData ? ({High: weatherData.daily[i].temp.max, Low: weatherData.daily[i].temp.min, Condition: weatherData.daily[i].weather[0].id}) : { High: null, Low: null, Condition: 100 }
-      this.data.weather.hourly[i] = weatherData ? ({Temp: weatherData.hourly[i].temp, Condition: weatherData.hourly[i].weather[0].id}) : { Temp: null, Condition: 100 }
+      const day = weatherData && weatherData.daily[i]
+      const hour = weatherData && weatherData.hourly[i]
+      this.data.weather.forecast[i] = day && day.temp && day.weather && day.weather[0] ? {High: day.temp.max, Low: day.temp.min, Condition: day.weather[0].id} : { High: null, Low: null, Condition: 100 }
+      this.data.weather.hourly[i] = hour && hour.weather && hour.weather[0] ? {Temp: hour.temp, Condition: hour.weather[0].id} : { Temp: null, Condition: 100 }
     }
 
     this.data.weather.tomorrowRain = weatherData ? weatherData.daily[1].pop * 100 : null
@@ -1645,11 +1656,24 @@ const weatherCal = {
     return ["af","al","ar","az","bg","ca","cz","da","de","el","en","eu","fa","fi","fr","gl","he","hi","hr","hu","id","it","ja","kr","la","lt","mk","no","nl","pl","pt","pt_br","ro","ru","sv","se","sk","sl","sp","es","sr","th","tr","ua","uk","vi","zh_cn","zh_tw","zu"]
   },
 
+  // Reject API errors and incomplete responses before using or caching them.
+  hasWeatherData(data) {
+    return !!(data && data.current && data.current.weather && data.current.weather[0] &&
+      data.daily && data.daily[0] && data.daily[0].temp && data.daily[1] &&
+      data.hourly && data.hourly[1] && data.hourly[1].weather && data.hourly[1].weather[0])
+  },
+
+  hasSunData(data) {
+    return !!(data && data.daily && data.daily[0] && data.daily[1] &&
+      data.daily[0].sunrise != null && data.daily[0].sunset != null && data.daily[1].sunrise != null)
+  },
+
   // Gets the cache.
   getCache(path, minAge = -1, maxAge) {
     if (!this.fm.fileExists(path)) return null
-    if (!this.fm.readString(path)) return null
-    const cache = JSON.parse(this.fm.readString(path))
+    let cache
+    try { cache = JSON.parse(this.fm.readString(path)) } catch { return null }
+    if (!cache || typeof cache != "object") return null
     const age = (this.now.getTime() - this.fm.modificationDate(path).getTime())/60000
 
     // Maximum ages must be explicitly defined.

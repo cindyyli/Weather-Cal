@@ -18,7 +18,7 @@ function makeWidget(files = {}) {
   widget.locale = "en_US"
   widget.settings = { widget: { units: "imperial" }, weather: { locale: "" } }
   widget.data = { location: { latitude: 40, longitude: -74 } }
-  return { widget, files }
+  return { widget, files, dates }
 }
 
 const forecast = {
@@ -69,4 +69,66 @@ test("COVID item and preferences are removed", async () => {
   assert.equal("covid" in settings, false)
   assert.equal("covid" in settings.localization, false)
   assert.equal("covid" in settings.font, false)
+})
+
+test("offline refresh without cached location or weather uses placeholders", async () => {
+  const { widget } = makeWidget({ "/library/weather-cal-api-key": "existing-key" })
+  widget.data = {}
+  widget.settings.widget.updateLocation = "60"
+  global.Device = { locale: () => "en_US" }
+  global.Location = { current: async () => { throw new Error("offline") } }
+  global.Request = class { constructor() { throw new Error("should not request without coordinates") } }
+
+  await widget.setupWeather()
+  await widget.setupSunrise()
+  assert.equal(widget.data.location.locality, "--")
+  assert.equal(widget.data.weather.currentTemp, null)
+  assert.equal(widget.data.sun.sunrise, null)
+})
+
+test("offline refresh keeps a valid cached forecast for up to six hours", async () => {
+  const { widget, files, dates } = makeWidget({
+    "/library/weather-cal-api-key": "existing-key",
+    "/library/weather-cal-api-path": "https://api.openweathermap.org/data/3.0/onecall",
+    "/library/weather-cal-cache": JSON.stringify(forecast),
+  })
+  dates["/library/weather-cal-cache"] = new Date(widget.now.getTime() - 2 * 60 * 60 * 1000)
+  global.Device = { locale: () => "en_US" }
+  global.Request = class { async loadJSON() { throw new Error("offline") } }
+
+  await widget.setupWeather()
+  assert.equal(widget.data.weather.currentTemp, 70)
+  assert.equal(JSON.parse(files["/library/weather-cal-cache"]).current.temp, 70)
+})
+
+test("API error does not replace a usable cached forecast", async () => {
+  const { widget, files, dates } = makeWidget({
+    "/library/weather-cal-api-key": "existing-key",
+    "/library/weather-cal-api-path": "https://api.openweathermap.org/data/3.0/onecall",
+    "/library/weather-cal-cache": JSON.stringify(forecast),
+  })
+  dates["/library/weather-cal-cache"] = new Date(widget.now.getTime() - 2 * 60 * 60 * 1000)
+  global.Device = { locale: () => "en_US" }
+  global.Request = class { async loadJSON() { return { cod: 401 } } }
+
+  await widget.setupWeather()
+  assert.equal(widget.data.weather.currentTemp, 70)
+  assert.equal(JSON.parse(files["/library/weather-cal-cache"]).current.temp, 70)
+})
+
+test("corrupt cache is ignored safely", async () => {
+  const { widget } = makeWidget({ "/library/weather-cal-cache": "invalid json" })
+  assert.equal(widget.getCache("/library/weather-cal-cache", 1, 360), null)
+})
+
+test("malformed weather response without cache uses placeholders", async () => {
+  const { widget } = makeWidget({
+    "/library/weather-cal-api-key": "existing-key",
+    "/library/weather-cal-api-path": "https://api.openweathermap.org/data/3.0/onecall",
+  })
+  global.Device = { locale: () => "en_US" }
+  global.Request = class { async loadJSON() { return { current: {}, daily: [] } } }
+  await widget.setupWeather()
+  assert.equal(widget.data.weather.currentTemp, null)
+  assert.equal(widget.data.weather.forecast[1].Condition, 100)
 })

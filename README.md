@@ -30,6 +30,8 @@ Weather Cal keeps the same OpenWeather API key and selected API path from existi
 
 If you already installed Weather Cal, replace the GitHub URL in your widget script with `https://raw.githubusercontent.com/jmew/Weather-Cal/main/weather-cal-code.js`, then run the script and select **Update code**. Existing layouts, preferences, API key, and saved weather API path remain in place. Back up both Scriptable scripts before updating so you can restore your working widget if needed.
 
+When a widget refresh happens without internet, it uses a valid cached forecast for up to six hours. After that, weather values show placeholders until the next successful refresh. The rest of the widget can still render without a cached location or forecast.
+
 ![Screenshots showing how to set up Weather Cal](https://github.com/mzeryck/Weather-Cal/blob/main/images/setup.jpg)
 
 Once Weather Cal is set up, you can make multiple widgets by duplicating the widget script. You only need one copy of the Weather Cal code script.
