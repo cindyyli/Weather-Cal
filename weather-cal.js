@@ -43,7 +43,7 @@ const layout = `
 
 // Names of Weather Cal elements.
 const codeFilename = "Weather Cal code"
-const gitHubUrl = "https://raw.githubusercontent.com/mzeryck/Weather-Cal/main/weather-cal-code.js"
+const gitHubUrl = "https://raw.githubusercontent.com/jmew/Weather-Cal/refs/heads/nosunrise/weather-cal-code.js"
 
 // Determine if the user is using iCloud.
 let files = FileManager.local()
@@ -57,11 +57,16 @@ const pathToCode = files.joinPath(files.documentsDirectory(), codeFilename + ".j
 if (!files.fileExists(pathToCode)) {
   const req = new Request(gitHubUrl)
   const codeString = await req.loadString()
+  if (!codeString.startsWith("// Variables used by Scriptable.") || !codeString.includes("module.exports = weatherCal")) {
+    throw new Error("Weather Cal code download was incomplete. Please try again later.")
+  }
   files.writeString(pathToCode, codeString)
 }
 
 // Import the code.
-if (iCloudInUse) { await files.downloadFileFromiCloud(pathToCode) }
+if (iCloudInUse) {
+  try { await files.downloadFileFromiCloud(pathToCode) } catch {}
+}
 const code = importModule(codeFilename)
 
 const custom = {
