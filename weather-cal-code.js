@@ -1363,7 +1363,13 @@ const weatherCal = {
         eventLabelStack.setPadding(this.padding, this.padding, this.padding, this.padding)
       }
 
-      const titleStack = this.align(currentStack)
+      // Give the whole event its own tap target, including location and time.
+      const itemStack = currentStack.addStack()
+      itemStack.layoutVertically()
+      itemStack.setPadding(0, 0, 0, 0)
+      itemStack.url = settingUrlExists ? eventSettings.url : this.eventLink(event)
+
+      const titleStack = this.align(itemStack)
       titleStack.layoutHorizontally()
 
       // If we're showing a color, and it's not shown on the right, add it to the left.
@@ -1394,7 +1400,7 @@ const weatherCal = {
 
       // Show the location if enabled.
       if (showLocation) {
-        const locationStack = this.align(currentStack)
+        const locationStack = this.align(itemStack)
         const location = this.provideText(event.location, locationStack, this.format.eventLocation)
         location.lineLimit = 1
         locationStack.setPadding(0, this.padding, showTime ? this.padding/5 : this.padding, this.padding)
@@ -1421,7 +1427,7 @@ const weatherCal = {
         timeText += " \u2022 " + hourText + (showSpace ? " " : "") + minuteText
       }
 
-      const timeStack = this.align(currentStack)
+      const timeStack = this.align(itemStack)
       const time = this.provideText(timeText, timeStack, this.format.eventTime)
       timeStack.setPadding(0, this.padding, this.padding, this.padding)
     }
@@ -1478,7 +1484,12 @@ const weatherCal = {
         continue
       }
 
-      const titleStack = this.align(reminderStack)
+      const itemStack = reminderStack.addStack()
+      itemStack.layoutVertically()
+      itemStack.setPadding(0, 0, 0, 0)
+      itemStack.url = settingUrl.length > 0 ? settingUrl : this.reminderLink(reminder)
+
+      const titleStack = this.align(itemStack)
       titleStack.layoutHorizontally()
       const showCalendarColor = reminderSettings.showListColor
       const colorShape = showListColor.includes("circle") ? "circle" : "rectangle"
@@ -1539,10 +1550,24 @@ const weatherCal = {
         timeText = df.string(reminder.dueDate)
       }
 
-      const timeStack = this.align(reminderStack)
+      const timeStack = this.align(itemStack)
       const time = this.provideText(timeText, timeStack, this.format.eventTime)
       timeStack.setPadding(0, this.padding, this.padding, this.padding)
     }
+  },
+
+  // Apple app links are undocumented; fall back when an item has no usable ID.
+  eventLink(event) {
+    const parts = typeof event.identifier == "string" ? event.identifier.trim().split(":") : []
+    if (parts.length == 2 && parts.every(part => part.length > 0)) {
+      return "x-apple-calevent://" + parts.map(part => encodeURIComponent(part)).join("/")
+    }
+    return "calshow:" + (Math.floor(event.startDate.getTime() / 1000) - 978307200)
+  },
+
+  reminderLink(reminder) {
+    const identifier = typeof reminder.identifier == "string" ? reminder.identifier.trim() : ""
+    return identifier ? "x-apple-reminderkit://REMCDReminder/" + encodeURIComponent(identifier) + "/details" : "x-apple-reminderkit://"
   },
 
   // Display the current weather.
